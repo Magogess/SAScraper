@@ -1,6 +1,6 @@
 import requests, time, re, os, configparser, sys, argparse
 from bs4 import BeautifulSoup
-from PIL import Image
+from PIL import Image, ImageFile
 from io import BytesIO
 
 
@@ -112,12 +112,16 @@ def main(args):
       if args.images:
         for tag in soup.find_all("img",{"src":True}):
           src = tag["src"]
+          # Remove trailing / from link
+          src = src.rstrip("/")
           # Handle //fi.somethingawful.com/* images.
           if src[:2] == "//":
             src = "https:" + src
           # Handle forum attachment images.
           if src[:4] != "http":
             src = "https://forums.somethingawful.com/" + src
+            # Forum attachment images may be missing data, accept these truncated images anyway:
+            ImageFile.LOAD_TRUNCATED_IMAGES = True
           imgname = src.split("/")[-1]
           # Constrain filename length to 255 char limit.
           imgname = imgname[:255]
@@ -126,30 +130,30 @@ def main(args):
             tag["src"] = f"images/{imgname}"
           else:
             try:
-              img = s.get(src, stream=True, headers=headers)
+              img = s.get(src, stream=True, headers=headers, timeout=(3.0, 5.0))
               if img.status_code == 200:
                 content_type = img.headers.get('Content-Type', '')
-                # Handle SVG images.
-                if 'image/svg+xml' in content_type:
+                # Handle SVG images or videos.
+                if 'image/svg+xml' in content_type or 'video' in content_type:
                   try:
                     with open(fullpath, "wb") as f:
                       f.write(img.content)
                       tag["src"] = f"images/{imgname}"
-                      print(f"\tSaved SVG {fullpath}.")
+                      print(f"\tSaving {fullpath}.")
                   except Exception as e:
-                    print(f"Failed to process SVG {src}: {e}")
-                # Handle raster images (PNG, JPEG, etc.).
+                    print(f"Failed to process {src}: {e}")
+                # Save raster images.
                 else:
                   try:
                     theimage = Image.open(BytesIO(img.content))
                     theimage.save(fullpath, format=theimage.format)
                     tag["src"] = f"images/{imgname}"
-                    print(f"\tSaving {fullpath}.")
+                    print(f"\tSaving image {fullpath}.")
                   except Exception as e:
                     print(f"\tFailed to process image {src}: {e}")
             # Handle network errors (404, 500, etc.).
             except Exception as e:
-                  print(f"\tFailed to retrieve image {src}: {e}")
+                  print(f"\tFailed to retrieve {src}: {e}")
       file.write(soup.prettify())
     i += 1
 
